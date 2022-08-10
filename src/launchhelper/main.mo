@@ -11,6 +11,7 @@ import Queue "mo:mutable-queue/Queue";
 import Sha2 "mo:sha2";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
+import AccountIdentifier "mo:principal/blob/AccountIdentifier";
 
 shared({caller = initowner}) actor class LaunchHelper()  = this {
   private stable var owner: Principal = initowner;
@@ -23,10 +24,10 @@ shared({caller = initowner}) actor class LaunchHelper()  = this {
 
   type Canister = {
     id: Principal;
-    owner: Principal;
     launchTrail: Principal;
     initArgs: Blob;
-    moduleHash: Blob;
+    var owner: Principal;
+    var moduleHash: Blob;
   };
   private stable var canisters: Queue.Queue<Canister> = Queue.empty();
 
@@ -77,11 +78,32 @@ shared({caller = initowner}) actor class LaunchHelper()  = this {
     return Hex.encode(Blob.toArray(wasmHash));
   };
 
-  public query({caller}) func queryCanisters(): async [Canister] {
+  public query func queryAgreePayee(): async Text {
+    AccountIdentifier.toText(selfAgreePayee());
+  };
+
+  public query func canisterAccount(): async Text {
+    AccountIdentifier.toText(accountId(null));
+  };
+
+  type CanisterInfo = {
+    id: Principal;
+    launchTrail: Principal;
+    initArgs: Blob;
+    owner: Principal;
+    moduleHash: Blob;
+  };
+  public query({caller}) func queryCanisters(): async [CanisterInfo] {
     assert(Principal.equal(caller, owner));
-    var items = Buffer.Buffer<Canister>(Queue.size(canisters));
+    var items = Buffer.Buffer<CanisterInfo>(Queue.size(canisters));
     for (item in Queue.toIter(canisters)) {
-      items.add(item);
+      items.add({
+        id = item.id;
+        launchTrail = item.launchTrail;
+        initArgs = item.initArgs;
+        owner = item.owner;
+        moduleHash = item.moduleHash;
+      });
     };
     return items.toArray();
   };
@@ -101,8 +123,9 @@ shared({caller = initowner}) actor class LaunchHelper()  = this {
     let res = await createCanister();
     switch(res){
       case(?canister_id){
-        let arg = to_candid(setting.owner, setting.name, setting.avatar, setting.desc, setting.payee, argeePayee);
-        Debug.print("setting: " # debug_show(setting) # " " # debug_show(setting.owner, setting.name, setting.avatar, setting.desc, setting.payee, argeePayee));
+        let agree = selfAgreePayee();
+        let arg = to_candid(setting.owner, setting.name, setting.avatar, setting.desc, setting.payee, agree);
+        Debug.print("setting: " # debug_show(setting) # " " # debug_show(setting.owner, setting.name, setting.avatar, setting.desc, setting.payee, agree));
         let isinstall = await installCanisterWasm(canister_id, #install, arg);
         if (not isinstall) {
           return null;
@@ -110,15 +133,30 @@ shared({caller = initowner}) actor class LaunchHelper()  = this {
 
         ignore Queue.pushBack(canisters, {
           id = canister_id;
-          owner = setting.owner;
           launchTrail = launchTrail;
           initArgs = arg;
-          moduleHash = wasmHash;
+          var owner = setting.owner;
+          var moduleHash = wasmHash;
         })
       };
       case(_){}
     };
     return res;
+  };
+
+  public shared({caller}) func upgradePlanet(cid: Principal) : async Bool {
+    assert(caller == owner);
+    switch(findCanister(cid)){
+      case(?canister) {
+        if (canister.moduleHash == wasmHash) {
+          return true;
+        };
+        let isinstall = await installCanisterWasm(canister.id, #upgrade, canister.initArgs);
+        return isinstall;
+      };
+      case(_){}
+    };
+    false
   };
 
   private func checkWasm(): Bool {
@@ -244,5 +282,24 @@ shared({caller = initowner}) actor class LaunchHelper()  = this {
       };
     };
     return false;
+  };
+
+  private func findCanister(cid : Principal): ?Canister {
+    Queue.find(canisters, eqPrincialId(cid));
+  };
+
+  private func eqPrincialId(aid : Principal) : {id : Principal } -> Bool {
+    func (x : { id : Principal }) : Bool { x.id == aid };
+  };
+
+  private func accountId(sa: ?[Nat8]): Blob {
+    AccountIdentifier.fromPrincipal(Principal.fromActor(this), sa);
+  };
+
+  private func selfAgreePayee(): Blob {
+    if (argeePayee.size() == 0) {
+      return accountId(null);
+    };
+    return argeePayee;
   };
 };
