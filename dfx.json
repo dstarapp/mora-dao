@@ -1,0 +1,25 @@
+{
+  "canisters": {
+    "launchhelper": {
+      "main": "src/launchhelper/main.mo",
+      "type": "motoko"
+    }
+  },
+  "defaults": {
+    "build": {
+      "packtool": "vessel sources"
+    }
+  },
+  "dfx": "0.11.0",
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:8000",
+      "type": "ephemeral"
+    },
+    "maintest": {
+      "providers": ["https://ic0.app"],
+      "type": "persistent"
+    }
+  },
+  "version": 1
+}
