@@ -1,15 +1,18 @@
-# launchhelper
+# Mora DAO 
 
 ## Introduction
 
-Launchhelper is Mora's launchtrail submiter, It manage all the planets canister install/upgrade.
+Mora DAO is Mora's launchtrail submiter, It manages all the planets canister install/upgrade.
 
 The planet's agreepayee is also this canister account.
+
+It will become the governance of mora in the future!
+
+## Help
 
 If you want to start working on your project right away, you might want to try the following commands:
 
 ```bash
-cd launchhelper/
 dfx help
 dfx config --help
 ```
