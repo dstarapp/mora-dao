@@ -12,13 +12,17 @@ import Sha2 "mo:sha2";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import AccountIdentifier "mo:principal/blob/AccountIdentifier";
+import Invitecode "./invitecode";
+import Prelude "mo:base/Prelude";
 
-shared({ caller = initowner }) actor class LaunchHelper() = this {
+shared ({ caller = initowner }) actor class MoraDAO() = this {
   private stable var owner : Principal = initowner;
   private stable var wasm : Blob = Blob.fromArray([]);
   private stable var wasmHash : Blob = Blob.fromArray([]);
   private stable var launchTrail : Principal = Principal.fromText("aaaaa-aa");
   private stable var userRouter : Principal = Principal.fromText("aaaaa-aa");
+  private stable var inviter : Principal = Principal.fromText("aaaaa-aa");
+  // private stable
   private stable var cyclesToken : Nat = 200_000_000_000;
   // 0.2 trillion cycles for each token canister
   private stable var argeePayee : Blob = Blob.fromArray([]);
@@ -35,6 +39,7 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
   type Version = {
     wasm : Blob;
     wasmHash : Blob;
+    created : Int;
   };
   private stable var versions : Queue.Queue<Version> = Queue.empty();
 
@@ -43,33 +48,47 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
     name : Text;
     avatar : Text;
     desc : Text;
+    code : Text; // invite code
   };
 
-  public shared({ caller }) func setOwner(p : Principal) {
+  type CreatePlanetResp = {
+    #Ok : { id : Principal };
+    #Err : Text;
+  };
+
+  public shared ({ caller }) func setOwner(p : Principal) {
     assert (Principal.equal(caller, owner));
     owner := owner;
   };
 
-  public shared({ caller }) func setWasm(blob : Blob) {
+  public shared ({ caller }) func setWasm(blob : Blob) {
     assert (Principal.equal(caller, owner));
     if (not checkWasm()) {
-      ignore Queue.pushBack(versions, { wasm = wasm; wasmHash = wasmHash });
+      ignore Queue.pushBack(
+        versions,
+        { wasm = wasm; wasmHash = wasmHash; created = Time.now() },
+      );
     };
     wasm := blob;
     wasmHash := Sha2.fromBlob(#sha256, wasm);
   };
 
-  public shared({ caller }) func setLaunch(p : Principal) {
+  public shared ({ caller }) func setLaunch(p : Principal) {
     assert (Principal.equal(caller, owner));
     launchTrail := p;
   };
 
-  public shared({ caller }) func setUserRouter(p : Principal) {
+  public shared ({ caller }) func setUserRouter(p : Principal) {
     assert (Principal.equal(caller, owner));
     userRouter := p;
   };
 
-  public shared({ caller }) func setAgreePayee(p : Blob) {
+  public shared ({ caller }) func setInviter(p : Principal) {
+    assert (Principal.equal(caller, owner));
+    inviter := p;
+  };
+
+  public shared ({ caller }) func setAgreePayee(p : Blob) {
     assert (Principal.equal(caller, owner));
     argeePayee := p;
   };
@@ -105,7 +124,7 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
         moduleHash = item.moduleHash;
       });
     };
-    return items.toArray();
+    return Buffer.toArray(items);
   };
 
   public query ({ caller }) func queryCanisterIds() : async [Text] {
@@ -114,10 +133,19 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
     for (item in Queue.toIter(canisters)) {
       items.add(Principal.toText(item.id));
     };
-    return items.toArray();
+    return Buffer.toArray(items);
   };
 
-  public shared({ caller }) func createPlanet(setting : CreatePlanetSetting) : async ?Principal {
+  public query ({ caller }) func queryCanisterPids() : async [Principal] {
+    // assert(Principal.equal(caller, owner));
+    var items = Buffer.Buffer<Principal>(Queue.size(canisters));
+    for (item in Queue.toIter(canisters)) {
+      items.add(item.id);
+    };
+    return Buffer.toArray(items);
+  };
+
+  public shared ({ caller }) func createPlanet(setting : CreatePlanetSetting) : async CreatePlanetResp {
 
     assert (checkWasm());
 
@@ -127,6 +155,14 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
     } = actor (Principal.toText(userRouter));
     let isVerify = await userActor.verify_canister(caller);
     assert (isVerify);
+
+    // verify valid invite code
+    let inviteActor : Invitecode.InviteCodeActor = actor (Principal.toText(inviter));
+
+    let isvalid = await inviteActor.verify_code(setting.code, setting.owner);
+    if (not isvalid) {
+      return #Err("Error: invite code is invalid");
+    };
 
     // create canister
     let res = await createCanister();
@@ -143,7 +179,7 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
         Debug.print("setting: " # debug_show (setting) # " " # debug_show (setting.owner, setting.name, setting.avatar, setting.desc, agree));
         let isinstall = await installCanisterWasm(canister_id, #install, arg);
         if (not isinstall) {
-          return null;
+          return #Err("Error: can not install planet canister");
         };
 
         ignore Queue.pushBack(
@@ -156,13 +192,15 @@ shared({ caller = initowner }) actor class LaunchHelper() = this {
             var moduleHash = wasmHash;
           },
         );
+        return #Ok({ id = canister_id });
       };
-      case (_) {};
+      case (_) {
+        return #Err("Error: can not create planet canister, please check the cycles.");
+      };
     };
-    return res;
   };
 
-  public shared({ caller }) func upgradePlanet(cid : Principal) : async Bool {
+  public shared ({ caller }) func upgradePlanet(cid : Principal) : async Bool {
     assert (caller == owner);
     switch (findCanister(cid)) {
       case (?canister) {
