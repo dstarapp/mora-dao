@@ -76,5 +76,5 @@ module {
     revoke : shared RevokeArgs -> async { #Ok; #Err : RevokeError };
     stats : shared query () -> async Stats;
     submit : shared Action -> async { #Ok : Nat64; #Err : SubmitError };
-  }
-}
+  };
+};

@@ -14,18 +14,23 @@ import Time "mo:base/Time";
 import AccountIdentifier "mo:principal/blob/AccountIdentifier";
 import Invitecode "./invitecode";
 import Prelude "mo:base/Prelude";
+import Cycles "mo:base/ExperimentalCycles";
+import Icmanager "icmanager";
+import Option "mo:base/Option";
+import Bool "mo:base/Bool";
+import Iter "mo:base/Iter";
 
 shared ({ caller = initowner }) actor class MoraDAO() = this {
   private stable var owner : Principal = initowner;
   private stable var wasm : Blob = Blob.fromArray([]);
   private stable var wasmHash : Blob = Blob.fromArray([]);
-  private stable var launchTrail : Principal = Principal.fromText("aaaaa-aa");
   private stable var userRouter : Principal = Principal.fromText("aaaaa-aa");
   private stable var inviter : Principal = Principal.fromText("aaaaa-aa");
   // private stable
-  private stable var cyclesToken : Nat = 200_000_000_000;
   // 0.2 trillion cycles for each token canister
   private stable var argeePayee : Blob = Blob.fromArray([]);
+  private stable var launchTrail : Any = null; // deprecated
+  private stable var cyclesToken : Any = null; // deprecated
 
   type Canister = {
     id : Principal;
@@ -43,6 +48,14 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   };
   private stable var versions : Queue.Queue<Version> = Queue.empty();
 
+  private stable var trailWasm : Blob = Blob.fromArray([]);
+  private stable var trailWasmHash : Blob = Blob.fromArray([]);
+  private stable var alltrails : Queue.Queue<Principal> = Queue.empty();
+
+  private stable var trailMaxCount : Nat = 800;
+  private stable var trailCycles : Nat = 200_000_000_000_000;
+  private stable var planetCycles : Nat = 200_000_000_000;
+
   type CreatePlanetSetting = {
     owner : Principal;
     name : Text;
@@ -55,10 +68,12 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     #Ok : { id : Principal };
     #Err : Text;
   };
+  system func preupgrade() {};
+  system func postupgrade() {};
 
   public shared ({ caller }) func setOwner(p : Principal) {
     assert (Principal.equal(caller, owner));
-    owner := owner;
+    owner := p;
   };
 
   public shared ({ caller }) func setWasm(blob : Blob) {
@@ -73,9 +88,21 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     wasmHash := Sha2.fromBlob(#sha256, wasm);
   };
 
-  public shared ({ caller }) func setLaunch(p : Principal) {
+  public shared ({ caller }) func setTrailWasm(blob : Blob) {
     assert (Principal.equal(caller, owner));
-    launchTrail := p;
+    trailWasm := blob;
+    trailWasmHash := Sha2.fromBlob(#sha256, trailWasm);
+  };
+
+  public shared ({ caller }) func initTrail(num : Int) : async Int {
+    assert (caller == owner);
+    var count : Int = 0;
+    for (i in Iter.range(1, num)) {
+      if (await addTrailCanister()) {
+        count := count + 1;
+      };
+    };
+    return count;
   };
 
   public shared ({ caller }) func setUserRouter(p : Principal) {
@@ -95,6 +122,10 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
 
   public query func queryWasmHash() : async Text {
     return Hex.encode(Blob.toArray(wasmHash));
+  };
+
+  public query func queryTrailWasmHash() : async Text {
+    return Hex.encode(Blob.toArray(trailWasmHash));
   };
 
   public query func queryAgreePayee() : async Text {
@@ -127,6 +158,11 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return Buffer.toArray(items);
   };
 
+  public query ({ caller }) func queryCanisterCount() : async Int {
+    assert (Principal.equal(caller, owner));
+    return Queue.size(canisters);
+  };
+
   public query ({ caller }) func queryCanisterIds() : async [Text] {
     // assert(Principal.equal(caller, owner));
     var items = Buffer.Buffer<Text>(Queue.size(canisters));
@@ -145,6 +181,11 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return Buffer.toArray(items);
   };
 
+  public query ({ caller }) func queryTrailPids() : async [Principal] {
+    assert (Principal.equal(caller, owner));
+    return Queue.toArray(alltrails);
+  };
+
   public shared ({ caller }) func createPlanet(setting : CreatePlanetSetting) : async CreatePlanetResp {
 
     assert (checkWasm());
@@ -156,6 +197,13 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     let isVerify = await userActor.verify_canister(caller);
     assert (isVerify);
 
+    // get launchtrail ID
+    let trail = await getTrail();
+    if (Option.isNull(trail)) {
+      return #Err("Error: can not get launchtrail, please contrat adminer");
+    };
+    let trail_id = Option.unwrap(trail);
+
     // verify valid invite code
     let inviteActor : Invitecode.InviteCodeActor = actor (Principal.toText(inviter));
 
@@ -165,7 +213,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     };
 
     // create canister
-    let res = await createCanister();
+    let res = await createPlanetCanister(trail_id);
     switch (res) {
       case (?canister_id) {
         let agree = selfAgreePayee();
@@ -177,7 +225,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
           agree,
         );
         Debug.print("setting: " # debug_show (setting) # " " # debug_show (setting.owner, setting.name, setting.avatar, setting.desc, agree));
-        let isinstall = await installCanisterWasm(canister_id, #install, arg);
+        let isinstall = await installPlanetCanisterWasm(trail_id, canister_id, #install, arg);
         if (not isinstall) {
           return #Err("Error: can not install planet canister");
         };
@@ -186,7 +234,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
           canisters,
           {
             id = canister_id;
-            launchTrail = launchTrail;
+            launchTrail = trail_id;
             initArgs = arg;
             var owner = setting.owner;
             var moduleHash = wasmHash;
@@ -207,7 +255,8 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
         if (canister.moduleHash == wasmHash) {
           return true;
         };
-        let isinstall = await installCanisterWasm(
+        let isinstall = await installPlanetCanisterWasm(
+          canister.launchTrail,
           canister.id,
           #upgrade,
           canister.initArgs,
@@ -226,14 +275,86 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return wasm.size() > 0;
   };
 
-  private func createCanister() : async ?Principal {
-    let launchActor : Launchtrail.Self = actor (Principal.toText(launchTrail));
+  private func getTrail() : async ?Principal {
+    let idx = Queue.size(canisters) + 1;
+    let max = Queue.size(alltrails);
+    if (idx > trailMaxCount * max) {
+      let ret = await addTrailCanister();
+      if (not ret) {
+        return null;
+      };
+    };
+    var index = idx / (Queue.size(alltrails) * trailMaxCount);
+    for (item in Queue.toIter(alltrails)) {
+      if (index == 0) {
+        return ?item;
+      };
+      index := index - 1;
+    };
+    return null;
+  };
+
+  private func addTrailCanister() : async Bool {
+    let canister = await createTrailCanister();
+    switch (canister) {
+      case (?canister_id) {
+        let ret = await installTrailCanister(canister_id);
+        ignore Queue.pushBack(alltrails, canister_id);
+        return ret;
+      };
+      case (_) {
+        return false;
+      };
+    };
+  };
+
+  private func createTrailCanister() : async ?Principal {
+    let params : IcManager.CreateCanisterParams = {
+      settings = ?{
+        controllers = ?[Principal.fromActor(this)];
+        compute_allocation = null;
+        memory_allocation = null;
+        freezing_threshold = null;
+      };
+    };
+
+    Cycles.add(trailCycles);
+    let ic_manager : Icmanager.ICActor = actor ("aaaaa-aa");
+    let res = await ic_manager.create_canister(params);
+
+    ?res.canister_id;
+  };
+
+  private func installTrailCanister(canister_id : Principal) : async Bool {
+    let ic_manager : Icmanager.ICActor = actor ("aaaaa-aa");
+    let config : Launchtrail.InitialConfig = {
+      bucket_size = 10000;
+      max_buckets = 1000;
+      config = {
+        min_schedule = 0;
+        revokers = [Principal.fromActor(this)];
+        submitters = [Principal.fromActor(this)];
+      };
+    };
+    let initArgs = to_candid (config);
+    let params : IcManager.InstallCodeParams = {
+      mode = #install;
+      canister_id = canister_id;
+      wasm_module = trailWasm;
+      arg = initArgs;
+    };
+    let res = await ic_manager.install_code(params);
+    return true;
+  };
+
+  private func createPlanetCanister(trail_id : Principal) : async ?Principal {
+    let launchActor : Launchtrail.Self = actor (Principal.toText(trail_id));
     let now = Time.now();
     let expire = now + 3600 * 1_000_000_000_000;
 
     let params : IcManager.CreateCanisterParams = {
       settings = ?{
-        controllers = ?[launchTrail];
+        controllers = ?[trail_id];
         compute_allocation = null;
         memory_allocation = null;
         freezing_threshold = null;
@@ -254,7 +375,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       requires = [];
       executors = null;
       revokers = null;
-      payment = cyclesToken;
+      payment = planetCycles;
     };
     let ret = await launchActor.submit(action);
 
@@ -291,12 +412,13 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return null;
   };
 
-  private func installCanisterWasm(
+  private func installPlanetCanisterWasm(
+    trail_id : Principal,
     canister_id : Principal,
     mode : IcManager.InstallMode,
     initArgs : Blob.Blob,
   ) : async Bool {
-    let launchActor : Launchtrail.Self = actor (Principal.toText(launchTrail));
+    let launchActor : Launchtrail.Self = actor (Principal.toText(trail_id));
     let now = Time.now();
     let expire = now + 3600 * 1_000_000_000_000;
 
