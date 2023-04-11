@@ -350,7 +350,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   private func createPlanetCanister(trail_id : Principal) : async ?Principal {
     let launchActor : Launchtrail.Self = actor (Principal.toText(trail_id));
     let now = Time.now();
-    let expire = now + 3600 * 1_000_000_000_000;
+    let expire = now + 3600 * 1_000_000_000;
 
     let params : IcManager.CreateCanisterParams = {
       settings = ?{
@@ -369,7 +369,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       url = "";
       method = "create_canister";
       sha256 = ?sha;
-      activates = #At(Nat64.fromIntWrap(now));
+      activates = #In(0);
       expires = #At(Nat64.fromIntWrap(expire));
       canister = Principal.fromText("aaaaa-aa");
       requires = [];
@@ -420,7 +420,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   ) : async Bool {
     let launchActor : Launchtrail.Self = actor (Principal.toText(trail_id));
     let now = Time.now();
-    let expire = now + 3600 * 1_000_000_000_000;
+    let expire = now + 3600 * 1_000_000_000;
 
     let params : IcManager.InstallCodeParams = {
       mode = mode;
@@ -437,7 +437,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       url = "";
       method = "install_code";
       sha256 = ?sha;
-      activates = #At(Nat64.fromIntWrap(now));
+      activates = #In(0);
       expires = #At(Nat64.fromIntWrap(expire));
       canister = Principal.fromText("aaaaa-aa");
       requires = [];
