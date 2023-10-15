@@ -182,7 +182,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   };
 
   public query ({ caller }) func queryTrailPids() : async [Principal] {
-    assert (Principal.equal(caller, owner));
+    // assert (Principal.equal(caller, owner));
     return Queue.toArray(alltrails);
   };
 
@@ -284,7 +284,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
         return null;
       };
     };
-    var index = idx / (Queue.size(alltrails) * trailMaxCount);
+    var index = idx / trailMaxCount;
     for (item in Queue.toIter(alltrails)) {
       if (index == 0) {
         return ?item;
