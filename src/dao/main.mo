@@ -5,6 +5,7 @@ import Debug "mo:base/Debug";
 import Hex "mo:encoding/Hex";
 import IcManager "./icmanager";
 import Launchtrail "./launchtrail";
+import Nat "mo:base/Nat";
 import Nat64 "mo:base/Nat64";
 import Principal "mo:base/Principal";
 import Queue "mo:mutable-queue/Queue";
@@ -134,6 +135,18 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
 
   public query func canisterAccount() : async Text {
     AccountIdentifier.toText(accountId(null));
+  };
+
+  //return cycles balance
+  public query func wallet_balance() : async Nat {
+    return Cycles.balance();
+  };
+
+  //cycles deposit
+  public func wallet_receive() : async { accepted : Nat64 } {
+    let available = Cycles.available();
+    let accepted = Cycles.accept(Nat.min(available, 10_000_000));
+    { accepted = Nat64.fromNat(accepted) };
   };
 
   type CanisterInfo = {
