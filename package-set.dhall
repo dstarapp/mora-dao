@@ -1,6 +1,11 @@
-let upstream = https://github.com/dfinity/vessel-package-set/releases/download/mo-0.8.1-20230203/package-set.dhall
+let upstream = https://github.com/dfinity/vessel-package-set/releases/download/mo-0.10.4-20240112/package-set.dhall
 let Package = { name : Text, version : Text, repo : Text, dependencies : List Text }
 let additions = [
+  { name = "base"
+  , repo = "https://github.com/dfinity/motoko-base"
+  , version = "moc-0.11.1"
+  , dependencies = [] : List Text
+  },
   { name = "io"
   , repo = "https://github.com/aviate-labs/io.mo"
   , version = "v0.3.0"

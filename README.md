@@ -1,4 +1,4 @@
-# Mora DAO 
+# MORA DAO
 
 ## Introduction
 
@@ -7,6 +7,28 @@ Mora DAO is Mora's launchtrail submiter, It manages all the planets canister ins
 The planet's agreepayee is also this canister account.
 
 It will become the governance of mora in the future!
+
+## Used WASM Source
+
+Planet wasm: bin/planet_ic.wasm.gz
+
+[Planet Source](https://github.com/dstarapp/mora-planet)
+
+```ic-repl
+import helper = "dao canister id";
+let wasm = file("./bin/planet_ic.wasm.gz");
+call helper.setWasm(wasm);
+```
+
+Launchtrail wasm: bin/launchtrail_ic.wasm.gz
+
+[Launchtrail Source](https://github.com/dstarapp/launchtrail)
+
+```ic-repl
+import helper = "dao canister id";
+let trailWasm = file("./bin/launchtrail_ic.wasm.gz");
+call helper.setTrailWasm(trailWasm);
+```
 
 ## Help
 
@@ -28,4 +50,3 @@ dfx start --background
 # Deploys your canisters to the replica and generates your candid interface
 dfx deploy
 ```
-

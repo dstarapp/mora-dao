@@ -1,4 +1,3 @@
-import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Debug "mo:base/Debug";
@@ -11,7 +10,6 @@ import Sha2 "mo:sha2";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import AccountIdentifier "mo:principal/blob/AccountIdentifier";
-import Prelude "mo:base/Prelude";
 import Cycles "mo:base/ExperimentalCycles";
 import Option "mo:base/Option";
 import Bool "mo:base/Bool";
@@ -57,6 +55,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   private stable var trailMaxCount : Nat = 800;
   private stable var trailCycles : Nat = 200_000_000_000_000;
   private stable var planetCycles : Nat = 200_000_000_000;
+  private stable var updaters : Queue.Queue<Principal> = Queue.empty();
 
   type CreatePlanetSetting = {
     owner : Principal;
@@ -89,6 +88,15 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   public shared ({ caller }) func setOwner(p : Principal) {
     assert (Principal.equal(caller, owner));
     owner := p;
+  };
+
+  public shared ({ caller }) func addUpdater(p : Principal) : async Bool {
+    assert (caller == owner);
+    if (verifyUpdater(p)) {
+      return true;
+    };
+    ignore Queue.pushBack(updaters, p);
+    return true;
   };
 
   public shared ({ caller }) func setWasm(blob : Blob) {
@@ -175,6 +183,17 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     argeePayee := p;
   };
 
+  public query func verify_planet(pid : Principal) : async Bool {
+    switch (findCanister(pid)) {
+      case (?canister) {
+        true;
+      };
+      case (_) {
+        false;
+      };
+    };
+  };
+
   public query func queryWasmHash() : async Text {
     return Hex.encode(Blob.toArray(wasmHash));
   };
@@ -199,7 +218,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   //cycles deposit
   public func wallet_receive() : async { accepted : Nat64 } {
     let available = Cycles.available();
-    let accepted = Cycles.accept(Nat.min(available, 10_000_000));
+    let accepted = Cycles.accept<system>(Nat.min(available, 10_000_000));
     { accepted = Nat64.fromNat(accepted) };
   };
 
@@ -210,7 +229,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     owner : Principal;
     moduleHash : Blob;
   };
-  public query ({ caller }) func queryCanisters() : async [CanisterInfo] {
+  public query func queryCanisters() : async [CanisterInfo] {
     // assert(Principal.equal(caller, owner));
     var items = Buffer.Buffer<CanisterInfo>(Queue.size(canisters));
     for (item in Queue.toIter(canisters)) {
@@ -230,7 +249,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return Queue.size(canisters);
   };
 
-  public query ({ caller }) func queryCanisterIds() : async [Text] {
+  public query func queryCanisterIds() : async [Text] {
     // assert(Principal.equal(caller, owner));
     var items = Buffer.Buffer<Text>(Queue.size(canisters));
     for (item in Queue.toIter(canisters)) {
@@ -239,7 +258,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     return Buffer.toArray(items);
   };
 
-  public query ({ caller }) func queryCanisterPids() : async [Principal] {
+  public query func queryCanisterPids() : async [Principal] {
     // assert(Principal.equal(caller, owner));
     var items = Buffer.Buffer<Principal>(Queue.size(canisters));
     for (item in Queue.toIter(canisters)) {
@@ -259,7 +278,25 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     };
   };
 
-  public query ({ caller }) func queryTrailPids() : async [Principal] {
+  public query func queryCanisterInfo(cid : Principal) : async ?CanisterInfo {
+    // assert(Principal.equal(caller, owner));
+    switch (findCanister(cid)) {
+      case (?canister) {
+        ?{
+          id = canister.id;
+          launchTrail = canister.launchTrail;
+          initArgs = canister.initArgs;
+          owner = canister.owner;
+          moduleHash = canister.moduleHash;
+        };
+      };
+      case (_) {
+        null;
+      };
+    };
+  };
+
+  public query func queryTrailPids() : async [Principal] {
     // assert (Principal.equal(caller, owner));
     return Queue.toArray(alltrails);
   };
@@ -327,7 +364,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
   };
 
   public shared ({ caller }) func upgradePlanet(cid : Principal) : async Bool {
-    assert (caller == owner);
+    assert (caller == owner or verifyUpdater(caller));
     switch (findCanister(cid)) {
       case (?canister) {
         if (canister.moduleHash == wasmHash) {
@@ -405,7 +442,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
 
   private func depositTrailCycle(trail_id : Principal) : async Bool {
     let launchActor : Launchtrail.Self = actor (Principal.toText(trail_id));
-    Cycles.add(trailCycles);
+    Cycles.add<system>(trailCycles);
     await launchActor.wallet_receive();
     true;
   };
@@ -420,7 +457,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       };
     };
 
-    Cycles.add(trailCycles);
+    Cycles.add<system>(trailCycles);
     let ic_manager : IcManager.ICActor = actor ("aaaaa-aa");
     let res = await ic_manager.create_canister(params);
 
@@ -445,7 +482,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       wasm_module = trailWasm;
       arg = initArgs;
     };
-    let res = await ic_manager.install_code(params);
+    let _res = await ic_manager.install_code(params);
     return true;
   };
 
@@ -579,7 +616,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     Queue.find(canisters, eqPrincialId(cid));
   };
 
-  private func limitCanisterIds(caller : Principal, req : QueryCommonReq) : (Int, Bool, [Principal]) {
+  private func limitCanisterIds(_caller : Principal, req : QueryCommonReq) : (Int, Bool, [Principal]) {
     var data = Buffer.Buffer<Principal>(0);
     let pagesize = checkPageSize(req.page, req.size);
     let size = pagesize.1;
@@ -590,7 +627,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     var iter : Iter.Iter<Canister> = Queue.toIter(canisters);
     Iter.iterate(
       iter,
-      func(x : Canister, idx : Int) {
+      func(x : Canister, _idx : Int) {
         if (total >= start and total < start + size) {
           data.add(x.id);
         };
@@ -631,5 +668,16 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
       size := 100;
     };
     return (page, size);
+  };
+
+  private func findUpdater(p : Principal) : ?Principal {
+    Queue.find(updaters, func(x : Principal) : Bool { x == p });
+  };
+
+  private func verifyUpdater(p : Principal) : Bool {
+    switch (findUpdater(p)) {
+      case (?id) { true };
+      case (_) { false };
+    };
   };
 };
