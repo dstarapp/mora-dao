@@ -15,6 +15,7 @@ Planet wasm: bin/planet_ic.wasm.gz
 [Planet Source](https://github.com/dstarapp/mora-planet)
 
 ```ic-repl
+#!ic-repl
 import helper = "dao canister id";
 let wasm = file("./bin/planet_ic.wasm.gz");
 call helper.setWasm(wasm);
@@ -25,10 +26,19 @@ Launchtrail wasm: bin/launchtrail_ic.wasm.gz
 [Launchtrail Source](https://github.com/dstarapp/launchtrail)
 
 ```ic-repl
+#!ic-repl
 import helper = "dao canister id";
 let trailWasm = file("./bin/launchtrail_ic.wasm.gz");
 call helper.setTrailWasm(trailWasm);
 ```
+
+## Mora Users
+
+the mora users canister source is [here](https://github.com/dstarapp/mora-users)
+
+## Mora Frontend
+
+the frontend [mora.app](https://mora.app), frontend source is [here](https://github.com/dstarapp/mora-frontend)
 
 ## Help
 
