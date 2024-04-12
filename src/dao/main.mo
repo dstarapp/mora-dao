@@ -183,7 +183,7 @@ shared ({ caller = initowner }) actor class MoraDAO() = this {
     argeePayee := p;
   };
 
-  public query func verify_planet(pid : Principal) : async Bool {
+  public query func verifyPlanet(pid : Principal) : async Bool {
     switch (findCanister(pid)) {
       case (?canister) {
         true;
